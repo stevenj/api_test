@@ -1,0 +1,225 @@
+openapi: 3.1.0
+x-stoplight:
+  id: 74p0jyzqh66qi
+info:
+  title: Catalyst Voting Transaction API
+  version: '0.1'
+  summary: An API for submitting votes in a Catalyst Voting Event.
+  description: 'This API is a strict subset of the API exposed by the Jormungandr blockchain, limited to the operations only required to facilitate recording vote transactions.'
+  contact:
+    name: Steven Johnson
+    url: www.iohk.io
+    email: steven.johnson@iohk.io
+  license:
+    name: CC BY 4.0
+    url: 'https://creativecommons.org/licenses/by/4.0/'
+servers:
+  - url: 'http://localhost:3000'
+    description: Local test node
+  - url: 'https://testnet.servicing-station.gov.iog.io'
+    description: Testnet Server
+  - description: Production Server
+    url: 'https://servicing-station.gov.iog.io'
+paths:
+  /api/v1/vote:
+    post:
+      summary: Post a Single Voting Transaction.  
+      description:  Post a transaction to the blockchain, but only properly formed Vote transactions may be posted to the blockchain with this endpoint.  Any other transaction type will be rejected with an error.
+      operationId: api_v1_vote
+      tags:
+        - transaction
+      requestBody:
+        description: |-
+          The Binary Encoded Data of the transaction.  
+
+          #### Transaction Format
+
+          TODO: Document the format of the transaction data.
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              description: Binary blob with message
+              format: binary
+              writeOnly: true
+            examples: {}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction-Processing-Summary'
+              examples:
+                Single Accepted Transaction:
+                  $ref: '#/components/examples/Single-Accepted-Transaction'
+                Single Rejected Transaction:
+                  $ref: '#/components/examples/Single-Rejected-Transaction'
+        '400':
+          description: An error occurred when processing this request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction-Processing-Summary'
+    parameters: []
+  /api/v1/fragments/statuses:
+    get:
+      description: Get statuses of fragments
+      operationId: FragmentStatuses
+      tags:
+        - transaction
+      parameters:
+        - in: query
+          name: fragment_ids
+          description: Comma-separated list of fragment IDs
+          schema:
+            type: string
+            pattern: '[0-9a-f]+(,[0-9a-f]+)+'
+          required: true
+          example: '68dcc12fe0dfe5e7b66ca6f8c959f9aa43b273e120a77fc3e4e2f04f1ecd7968,b34bf76412138543d7b57ea23ff58b6b6c04a954c0badc3cadeafc564f1a771'
+      responses:
+        '200':
+          description: Success. If a fragment is missing from in-memory fragment logs it will not show up in the result dictionary.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  oneOf:
+                    - description: Fragment is yet to be processed
+                      type: string
+                      enum:
+                        - Pending
+                    - description: "Fragment was rejected and won't be added to a block"
+                      type: object
+                      required:
+                        - Rejected
+                      properties:
+                        Rejected:
+                          type: object
+                          required:
+                            - reason
+                          properties:
+                            reason:
+                              description: Reason for rejection
+                              type: string
+                    - description: Fragment was added to a block
+                      type: object
+                      required:
+                        - InABlock
+                      properties:
+                        InABlock:
+                          type: object
+                          required:
+                            - date
+                            - block
+                          properties:
+                            date:
+                              description: Epoch and slot ID of block containing fragment separated with a dot
+                              type: string
+                              pattern: "[0-9]+\\.[0-9]+"
+                            block:
+                              description: Block hash where the fragment was last seen
+                              type: string
+                              pattern: '[0-9a-fa-f]+'
+              example:
+                {
+                  '68dcc12fe0dfe5e7b66ca6f8c959f9aa43b273e120a77fc3e4e2f04f1ecd7968': 'Pending',
+                }
+components:
+  schemas:
+    Transaction-Processing-Summary:
+      type: object
+      description: |
+        Individual transactions are called ***Fragments***.  This response details if the fragment/s subitted were acceptable to the *Jormungandr* node.  
+
+        If a transaction is accepted, this response does not mean it is guaranteed to get recorded to the blockchain, Only that it has passed initial validation.    
+
+        If a transaction is rejected, it will be listed in the rejected array, along with the reason why.
+
+        Questions:
+        1. Is it correct that accepted fragments  can still get rejected later?
+        2. If there is only 1 fragment and its accepted, will there still be an empty rejected list?
+        3. If there is only 1 fragement and its rejected, will there still be an empty accepted list?
+        4. What is the pool_number in the response?  Whats its format?  Is it optional?
+      title: Transaction Processing Summary
+      minProperties: 1
+      maxProperties: 2
+      properties:
+        accepted:
+          type: array
+          description: |-
+            List of IDs of accepted transactions.  There will only ever be IDs for transactions submiited in the request being replied to.  If no transactions were accepted, this list will be empty.
+
+            Each ID will be unique.
+
+            This field may be absent if there are no Accepted Transactions.
+
+            Note: An accepted transaction has only passed initial validation and may still fail to be recorded onto the block chain.  Refer to ??? For details on how to validate the transactions have been accepted on the block chain.
+          minItems: 0
+          uniqueItems: true
+          default: []
+          items:
+            type: string
+            format: '[0-9a-f]+'
+            example: dghsfgywer57635466ybsfdtfhwr7nxfghhv
+            readOnly: true
+          readOnly: true
+        rejected:
+          type: array
+          description: Detailed information about every rejected transaction.
+          minItems: 0
+          uniqueItems: true
+          items:
+            type: object
+            description: A Single rejected transaction
+            minProperties: 3
+            maxProperties: 3
+            properties:
+              id:
+                description: The ID of a rejected fragment
+                type: string
+                format: '[0-9a-f]+'
+              pool_number:
+                description: |-
+                  The number of the pool that caused this error
+                  TODO: What is this field, what does the caller use it for?  What is its format, if any?  Is it always returned, or optional?
+                type: integer
+              reason:
+                type: string
+                description: |
+                  * `FragmentAlreadyInLog` -- this fragment was already processed by this node.
+                  * `FragmentInvalid` -- this fragment failed validation.
+                  * `PreviousFragmentInvalid` -- one of the previous fragments was rejected and `fail_fast` is enabled.
+                  * `PoolOverflow` -- One of the pools rejected this fragment due to reaching the capacity limit.
+                enum:
+                  - FragmentAlreadyInLog
+                  - FragmentInvalid
+                  - PreviousFragmentInvalid
+                  - PoolOverflow
+                example: FragmentAlreadyInLog
+                readOnly: true
+            required:
+              - id
+              - reason
+      examples: []
+  securitySchemes: {}
+  examples:
+    Single-Accepted-Transaction:
+      summary: A single accepted transaction
+      description: 'The result from a single transaction, which was accepted.'
+      value:
+        accepted:
+          - ajhkdfbjaf487jhadvgjq807tjhv
+    Single-Rejected-Transaction:
+      summary: A single rejected transaction
+      description: 'The result from a single transaction, which was rejected because it is already posted to the blockchain.'
+      value:
+        rejected:
+          - id: zkjhfgi5w3l4y56897jkhdsrgb8q3765isjhg87o246t5jhzdrbt
+            pool_number: 77
+            reason: FragmentAlreadyInLog
+tags:
+  - name: transaction
+    description: A Transaction Operation
